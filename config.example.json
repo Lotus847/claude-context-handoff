@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "notifyPct": 0.70,
+  "urgentPct": 0.88,
+  "softCapTokens": null,
+  "contextLimitTokens": null,
+  "contextLimits": { "default": 200000, "1m": 1000000 },
+  "newSessionFlags": "--permission-mode auto",
+  "newSessionMode": "tab",
+  "trustNewSessionFolder": false,
+  "debug": false
+}

@@ -1,0 +1,15 @@
+{
+  "name": "claude-context-handoff",
+  "version": "0.1.0",
+  "description": "Self-aware context-drift detection + automated session handoff for Claude Code: a session notices when its context window is filling, writes a high-fidelity handoff, and opens a fresh session to continue.",
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "setup": "node install.js",
+    "remove": "node uninstall.js",
+    "test": "node test/selftest.js"
+  },
+  "keywords": ["claude", "claude-code", "skill", "context-window", "handoff", "hooks", "statusline"],
+  "repository": { "type": "git", "url": "https://github.com/chiovarijr1-png/claude-context-handoff" }
+}
