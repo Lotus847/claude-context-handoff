@@ -11,5 +11,5 @@
     "test": "node test/selftest.js"
   },
   "keywords": ["claude", "claude-code", "skill", "context-window", "handoff", "hooks", "statusline"],
-  "repository": { "type": "git", "url": "https://github.com/chiovarijr1-png/claude-context-handoff" }
+  "repository": { "type": "git", "url": "https://github.com/Lotus847/claude-context-handoff" }
 }

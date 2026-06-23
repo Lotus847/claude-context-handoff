@@ -15,7 +15,7 @@ This fixes that with two sensors and one action:
 Requires [Node.js](https://nodejs.org) 18+ and [Claude Code](https://claude.com/claude-code).
 
 ```bash
-git clone https://github.com/chiovarijr1-png/claude-context-handoff
+git clone https://github.com/Lotus847/claude-context-handoff
 cd claude-context-handoff
 node install.js
 ```
