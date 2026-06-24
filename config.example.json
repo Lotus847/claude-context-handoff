@@ -6,7 +6,7 @@
   "contextLimitTokens": null,
   "contextLimits": { "default": 200000, "1m": 1000000 },
   "newSessionFlags": "--permission-mode auto",
-  "newSessionMode": "tab",
+  "newSessionMode": "agent",
   "trustNewSessionFolder": false,
   "debug": false
 }

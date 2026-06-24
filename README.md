@@ -8,7 +8,7 @@ This fixes that with two sensors and one action:
 
 - **A gauge hook** (the model's eyes) reads the real per-turn token usage Claude Code records in the transcript, and when you cross a threshold it injects a `[context-handoff]` nudge the model reads.
 - **A statusline** (your eyes) shows live `🧠 ctx 63% (126k/200k)`, green → yellow → red.
-- **A `/handoff` skill** (the hands) that — on the nudge, or when you type `/handoff` — writes a full-fidelity `HANDOFF.md` (authored while the session still holds the full context), then **opens a new, named terminal session seeded to continue**, and offers to close the old one.
+- **A `/handoff` skill** (the hands) that — on the nudge, or when you type `/handoff` — writes a full-fidelity `HANDOFF.md` (authored while the session still holds the full context), then **opens a new session — by default a background session in `claude agents` (Agent View), with no new terminal — named and seeded to continue**, and offers to close the old one.
 
 ## Install
 
@@ -33,7 +33,7 @@ Either way, `/handoff`:
 1. reads the current context %,
 2. refreshes whatever durable memory you have (native auto-memory / `CLAUDE.md` / your notes — skipped if you have none),
 3. writes `~/.claude/context-handoff/handoffs/<project>/HANDOFF.md` with a ready-to-paste cold-start,
-4. opens a **new tab** in your current Windows Terminal window, named for tracking and seeded to read the handoff and continue **in auto mode**,
+4. opens a **new session in `claude agents`** (Agent View) by default — named for tracking, seeded to read the handoff, running **in auto mode**, and prints a `claude attach <id>` command (or a Windows Terminal tab/window if you set `newSessionMode`),
 5. asks whether to close the old session.
 
 ## Configuration
@@ -47,7 +47,7 @@ Edit `~/.claude/context-handoff/config.json` (re-read live):
 | `softCapTokens` | `null` | Optional absolute early-notify floor (e.g. `300000` on a 1M-context model) |
 | `contextLimitTokens` | `null` | Pin your window size (e.g. `1000000`); `null` = auto-detect |
 | `newSessionFlags` | `"--permission-mode auto"` | Flags for the launched session. `""` for none; `"--dangerously-skip-permissions"` for fully hands-free (disables **all** gates) |
-| `newSessionMode` | `"tab"` | `"tab"` = new tab in current Windows Terminal window; `"window"` = separate window |
+| `newSessionMode` | `"agent"` | `"agent"` = background session in `claude agents` (Agent View; no terminal, cross-platform); `"tab"` = new Windows Terminal tab; `"window"` = separate window |
 | `trustNewSessionFolder` | `false` | Pre-accept the folder's trust dialog (see Security) |
 
 ## Platform support
@@ -55,10 +55,11 @@ Edit `~/.claude/context-handoff/config.json` (re-read live):
 | Feature | Windows | macOS / Linux |
 |---------|:-------:|:-------------:|
 | Gauge hook + statusline + `/handoff` doc | ✅ | ✅ |
-| Auto-**launch** a new session | ✅ (Windows Terminal / `start`) | ⏳ prints the exact command to run manually |
+| Launch new session — **`agent`** mode (`claude --bg`, default) | ✅ | ✅ |
+| Launch — `tab` / `window` mode | ✅ (Windows Terminal / `start`) | ⏳ prints the manual command |
 | Auto-**close** the old session | ✅ | ⏳ close manually |
 
-macOS/Linux auto-launch/close aren't implemented yet — the seam is `src/lib/platform.js`. **PRs welcome.**
+The default `agent` mode (background session in Agent View) works everywhere. The Windows-only `tab`/`window` modes and auto-close use `wt`/`cmd`/`taskkill`; the macOS/Linux seam is `src/lib/platform.js`. **PRs welcome.**
 
 ## Security notes
 

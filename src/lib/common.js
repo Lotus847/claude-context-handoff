@@ -18,7 +18,7 @@ const DEFAULT_CONFIG = {
   contextLimitTokens: null,   // pin this machine's window size (e.g. 1000000); null = auto-detect
   contextLimits: { default: 200000, '1m': 1000000 }, // fallback window size by model id
   newSessionFlags: '--permission-mode auto', // flags for the launched session; '' for none, '--dangerously-skip-permissions' for fully hands-free (disables ALL gates)
-  newSessionMode: 'tab',      // 'tab' = new tab in current Windows Terminal window; 'window' = separate window
+  newSessionMode: 'agent',    // 'agent' = background session in `claude agents` (Agent View; no new terminal, cross-platform); 'tab' = new Windows Terminal tab; 'window' = separate window
   trustNewSessionFolder: false, // pre-accept the launched folder's trust dialog by editing ~/.claude.json (off by default — it changes a security gate; opt in if you understand it)
   debug: false
 };
@@ -141,10 +141,18 @@ function handoffPathsFor(key) {
 }
 function gaugeMarkerPath(sid) { return path.join(os.tmpdir(), `claude-handoff-gauge-${sid}.json`); }
 
+// Resolve the claude binary (for spawning a background session). Prefer the standard
+// install path; fall back to 'claude' on PATH.
+function detectClaudeBin() {
+  const cands = [path.join(os.homedir(), '.local', 'bin', 'claude.exe'), path.join(os.homedir(), '.local', 'bin', 'claude')];
+  for (const p of cands) { try { if (fs.existsSync(p)) return p; } catch {} }
+  return 'claude';
+}
+
 module.exports = {
   RUNTIME_DIR, CONFIG_PATH, DATA_DIR, DEFAULT_CONFIG, loadConfig,
   readStdin, parseHookInput, sessionIdFrom, slugify, projectKeyFrom,
   ensureDir, readJson, safeRead, writeFileAtomic, writeJsonAtomic,
   contextTokensFromUsage, modelContextLimit, resolveContextLimit, readLastUsage,
-  handoffTier, tierRank, handoffPathsFor, gaugeMarkerPath
+  handoffTier, tierRank, handoffPathsFor, gaugeMarkerPath, detectClaudeBin
 };

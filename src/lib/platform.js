@@ -1,43 +1,65 @@
 'use strict';
-// Per-OS layer for launching/closing sessions. Windows is implemented; macOS/Linux
-// throw a clear "not yet implemented" with the exact command to run manually, so the
-// rest of the system is OS-agnostic and contributors have an obvious seam to fill.
+// Per-OS launching/closing of handoff sessions.
+//   agent  (default) — `claude --bg`: a BACKGROUND session that appears in `claude agents`
+//                      (Agent View); no terminal spawned; cross-platform.
+//   tab    — new tab in the current Windows Terminal window (Windows only).
+//   window — separate terminal window (Windows only).
+// On macOS/Linux, tab/window aren't implemented and return the manual command (agent works).
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { spawn, execFileSync, spawnSync } = require('child_process');
+const { spawn, spawnSync, execFileSync } = require('child_process');
+const c = require('./common');
 
 const PLATFORM = process.platform; // 'win32' | 'darwin' | 'linux'
 
-// Build the `claude` invocation common to all platforms.
 function claudeCommand({ flags, name, prompt }) {
   const f = flags ? flags + ' ' : '';
   return `claude ${f}-n "${name}" "${prompt}"`;
 }
-
-// ---- Windows ---------------------------------------------------------------
-
-// cmd wraps quoted args and expands %VAR% — strip quotes/newlines, escape %.
 const cleanWin = s => String(s == null ? '' : s).replace(/["\r\n]/g, ' ').replace(/%/g, '%%').trim();
 
-function launchWindows({ cwd, name, prompt, flags, mode }) {
+// ---- agent mode (cross-platform): background session in `claude agents` -----
+function launchAgent({ cwd, name, prompt, flags, dry }) {
+  const bin = c.detectClaudeBin();
+  const flagsArr = (flags || '').trim() ? flags.trim().split(/\s+/) : [];
+  const args = ['--bg', ...flagsArr, '-n', name, prompt];           // arg array → no shell quoting
+  if (dry) return { dryRun: true, mode: 'agent', command: [bin, ...args] };
+  const r = spawnSync(bin, args, { cwd, encoding: 'utf8', timeout: 60000, windowsHide: true });
+  const out = (r.stdout || '').replace(/\x1b\[[0-9;]*m/g, '');       // strip ANSI; stdout: "backgrounded · <id> · <name>"
+  const m = out.match(/backgrounded\s*·\s*([0-9a-f]+)\s*·/i) || out.match(/\battach\s+([0-9a-f]{6,})/i);
+  const id = m ? m[1] : null;
+  return { launched: r.status === 0, mode: 'agent', name, id, attach: id ? `claude attach ${id}` : null, status: r.status, stderr: (r.stderr || '').slice(0, 200) };
+}
+
+// ---- Windows tab/window ----------------------------------------------------
+function launchWindows({ cwd, name, prompt, flags, mode, dry }) {
   const n = cleanWin(name).slice(0, 60) || 'handoff continuation';
   const p = cleanWin(prompt);
   const fl = String(flags || '').replace(/["\r\n]/g, ' ').replace(/%/g, '%%').trim();
   const cmdFile = path.join(os.tmpdir(), `claude-handoff-launch-${process.pid}.cmd`);
-  // title labels the WT tab; cd then launch claude. Everything in a .cmd so nothing
-  // has to survive inter-process quoting.
   const body = `@echo off\r\ntitle ${n}\r\ncd /d "${cwd}"\r\n${claudeCommand({ flags: fl, name: n, prompt: p })}\r\n`;
-  // wt is invoked THROUGH cmd so the WindowsApps execution-alias resolves.
-  const args = mode === 'window'
-    ? ['/c', 'start', '', 'cmd', '/k', cmdFile]
-    : ['/c', 'wt', '-w', '0', 'new-tab', 'cmd', '/k', cmdFile];
+  const args = mode === 'window' ? ['/c', 'start', '', 'cmd', '/k', cmdFile] : ['/c', 'wt', '-w', '0', 'new-tab', 'cmd', '/k', cmdFile];
+  const m = mode === 'window' ? 'window' : 'tab';
+  if (dry) return { dryRun: true, mode: m, cmdBody: body, spawn: ['cmd.exe', ...args] };
   fs.writeFileSync(cmdFile, body);
   spawn('cmd.exe', args, { detached: true, stdio: 'ignore', windowsHide: false }).unref();
-  return { launched: true, mode: mode === 'window' ? 'window' : 'tab', cmdFile };
+  return { launched: true, mode: m, cmdFile };
 }
 
+function launchSession(opts) {
+  const mode = opts.mode || 'agent';
+  if (mode === 'agent') return launchAgent(opts);                   // cross-platform
+  if (PLATFORM === 'win32') return launchWindows(opts);
+  return {
+    launched: false, unsupported: PLATFORM,
+    manual: `cd "${opts.cwd}" && ${claudeCommand(opts)}`,
+    note: `'${mode}' launch is Windows-only; run the command above, or set newSessionMode "agent" (cross-platform).`
+  };
+}
+
+// ---- close the current session (force-terminate the host process) ----------
 function closeWindows() {
   const ps = cmd => { try { return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmd], { encoding: 'utf8' }).trim(); } catch { return ''; } };
   let pid = process.pid; const chain = [];
@@ -57,27 +79,15 @@ function closeWindows() {
   return { closed: false, chain };
 }
 
-// ---- public surface --------------------------------------------------------
-
-function launchSession(opts) {
-  if (PLATFORM === 'win32') return launchWindows(opts);
-  // Not yet implemented elsewhere — hand back the exact command to run manually.
-  return {
-    launched: false,
-    unsupported: PLATFORM,
-    manual: `cd "${opts.cwd}" && ${claudeCommand(opts)}`,
-    note: `Auto-launch for ${PLATFORM} is not implemented yet. Run the command above in a new terminal. (Contributions welcome — implement launch in src/lib/platform.js.)`
-  };
-}
-
 function closeSession() {
   if (PLATFORM === 'win32') return closeWindows();
   return { closed: false, unsupported: PLATFORM, note: `Auto-close for ${PLATFORM} is not implemented yet — close the tab/window manually.` };
 }
 
 // Pre-accept a folder's workspace-trust dialog by editing ~/.claude.json (cross-platform).
-// SECURITY: this disables a Claude Code safety gate for that folder; only call when the user
-// has explicitly opted in (config.trustNewSessionFolder). Safe write: validate, backup, atomic.
+// SECURITY: disables a Claude Code safety gate for that folder; only call on explicit opt-in
+// (config.trustNewSessionFolder). Important for agent mode (a bg session has no terminal to
+// accept the dialog). Safe write: validate, back up once, atomic.
 function setFolderTrust(dir) {
   try {
     const cfgPath = path.join(os.homedir(), '.claude.json');
