@@ -65,27 +65,21 @@ function launchSession(opts) {
 // just BELOW the supervisor (parent isn't claude, or is a claude with >1 claude child) — then
 // tree-kill that PID. The killer is launched OUT of our tree (WMI Create) so it survives
 // killing its own ancestors. Closes only this session; siblings are untouched.
-function closeWindows() {
-  const ps = cmd => { try { return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmd], { encoding: 'utf8' }).trim(); } catch { return ''; } };
-  const procInfo = pid => { const row = ps(`$p=Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if($p){"$($p.Name)|$($p.ParentProcessId)"}`); if (!row || row.indexOf('|') < 0) return null; const [n, pp] = row.split('|'); return { pid, name: (n || '').trim(), ppid: parseInt(pp, 10) || 0 }; };
-  const isClaude = n => /^claude(\.exe)?$/i.test(n || '');
-  const claudeKids = pid => { const r = ps(`@(Get-CimInstance Win32_Process -Filter "ParentProcessId=${pid}" | Where-Object { $_.Name -match 'claude' }).Count`); return parseInt(r, 10) || 0; };
-  const chain = [];
-  let cur = procInfo(process.pid), g = 0;
-  while (cur && g++ < 30) { chain.push(`${cur.pid}:${cur.name}`); if (isClaude(cur.name)) break; cur = cur.ppid ? procInfo(cur.ppid) : null; }
-  if (!cur || !isClaude(cur.name)) return { closed: false, chain };
-  let root = cur; g = 0;
-  while (g++ < 30) { const p = root.ppid ? procInfo(root.ppid) : null; if (!p || !isClaude(p.name)) break; if (claudeKids(p.pid) > 1) break; root = p; }
-  const killCmd = `cmd.exe /c ping 127.0.0.1 -n 2 >nul & taskkill /F /T /PID ${root.pid}`;
-  try {
-    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='${killCmd}'} | Out-Null`], { timeout: 10000 });
-    return { closed: true, pid: root.pid, chain };
-  } catch (e) { return { closed: false, pid: root.pid, chain, error: String((e && e.message) || e).slice(0, 120) }; }
-}
-
+// Close the CURRENT session cleanly via the Claude Code DAEMON. Do NOT taskkill the session's
+// processes: every session runs under a shared daemon (`claude daemon run`) via a per-session
+// --bg-pty-host, and the daemon RESPAWNS a session whose processes you kill (so it won't close).
+// `claude stop <session-id>` tells the daemon to end it (and lets the session's Stop hooks run).
+// Cross-platform.
 function closeSession() {
-  if (PLATFORM === 'win32') return closeWindows();
-  return { closed: false, unsupported: PLATFORM, note: `Auto-close for ${PLATFORM} is not implemented yet — close the tab/window manually.` };
+  const sid = process.env.CLAUDE_CODE_SESSION_ID || '';
+  if (!sid) return { closed: false, note: 'no CLAUDE_CODE_SESSION_ID in env — close the tab manually (Ctrl+C / /exit)' };
+  // LANDMINE: `claude stop` takes the SHORT 8-char agent id (the first block of the session
+  // UUID). Passing the full UUID is REJECTED with "No job matching ...". Derive the short id.
+  const shortId = sid.slice(0, 8);
+  const bin = c.detectClaudeBin();
+  const r = spawnSync(bin, ['stop', shortId], { encoding: 'utf8', timeout: 15000, windowsHide: true });
+  const out = ((r.stdout || '') + (r.stderr || '')).replace(/\x1b\[[0-9;]*m/g, '').trim();
+  return { closed: r.status === 0, sessionId: sid, id: shortId, via: 'claude stop', out: out.slice(0, 160) };
 }
 
 // Pre-accept a folder's workspace-trust dialog by editing ~/.claude.json (cross-platform).
