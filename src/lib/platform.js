@@ -60,23 +60,27 @@ function launchSession(opts) {
 }
 
 // ---- close the current session (force-terminate the host process) ----------
+// Close THIS session's tree. Claude Code nests several claude.exe layers and runs many
+// sessions under a SHARED supervisor claude.exe, so we climb the linear claude chain and stop
+// just BELOW the supervisor (parent isn't claude, or is a claude with >1 claude child) — then
+// tree-kill that PID. The killer is launched OUT of our tree (WMI Create) so it survives
+// killing its own ancestors. Closes only this session; siblings are untouched.
 function closeWindows() {
   const ps = cmd => { try { return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmd], { encoding: 'utf8' }).trim(); } catch { return ''; } };
-  let pid = process.pid; const chain = [];
-  for (let i = 0; i < 15 && pid > 0; i++) {
-    const row = ps(`$p=Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if($p){"$($p.Name)|$($p.ParentProcessId)"}`);
-    if (!row || row.indexOf('|') < 0) break;
-    const [name, ppidStr] = row.split('|');
-    chain.push(`${pid}:${(name || '').trim()}`);
-    if (/^claude(\.exe)?$/i.test((name || '').trim())) {
-      try { spawnSync('taskkill', ['/PID', String(pid), '/F'], { encoding: 'utf8' }); } catch {}
-      return { closed: true, pid, chain };
-    }
-    const ppid = parseInt(ppidStr, 10);
-    if (!ppid || ppid === pid) break;
-    pid = ppid;
-  }
-  return { closed: false, chain };
+  const procInfo = pid => { const row = ps(`$p=Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if($p){"$($p.Name)|$($p.ParentProcessId)"}`); if (!row || row.indexOf('|') < 0) return null; const [n, pp] = row.split('|'); return { pid, name: (n || '').trim(), ppid: parseInt(pp, 10) || 0 }; };
+  const isClaude = n => /^claude(\.exe)?$/i.test(n || '');
+  const claudeKids = pid => { const r = ps(`@(Get-CimInstance Win32_Process -Filter "ParentProcessId=${pid}" | Where-Object { $_.Name -match 'claude' }).Count`); return parseInt(r, 10) || 0; };
+  const chain = [];
+  let cur = procInfo(process.pid), g = 0;
+  while (cur && g++ < 30) { chain.push(`${cur.pid}:${cur.name}`); if (isClaude(cur.name)) break; cur = cur.ppid ? procInfo(cur.ppid) : null; }
+  if (!cur || !isClaude(cur.name)) return { closed: false, chain };
+  let root = cur; g = 0;
+  while (g++ < 30) { const p = root.ppid ? procInfo(root.ppid) : null; if (!p || !isClaude(p.name)) break; if (claudeKids(p.pid) > 1) break; root = p; }
+  const killCmd = `cmd.exe /c ping 127.0.0.1 -n 2 >nul & taskkill /F /T /PID ${root.pid}`;
+  try {
+    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='${killCmd}'} | Out-Null`], { timeout: 10000 });
+    return { closed: true, pid: root.pid, chain };
+  } catch (e) { return { closed: false, pid: root.pid, chain, error: String((e && e.message) || e).slice(0, 120) }; }
 }
 
 function closeSession() {
