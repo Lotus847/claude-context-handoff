@@ -12,9 +12,10 @@ const DATA_DIR = path.join(RUNTIME_DIR, 'handoffs');            // per-project h
 
 const DEFAULT_CONFIG = {
   enabled: true,
-  notifyPct: 0.70,            // first "drifting past optimal" nudge at this fraction of the window
-  urgentPct: 0.88,            // "act now" — auto-compaction is near
-  softCapTokens: null,        // optional absolute early-notify floor (e.g. 300000 on a 1M-context model); null disables
+  notifyPct: 0.55,            // notify % gate (binds on 200k windows ≈ quality knee)
+  urgentPct: 0.70,            // urgent % gate (binds on 200k; safely below the ~83.5% auto-compaction ceiling)
+  softCapTokens: 300000,      // absolute NOTIFY floor — binds on 1M windows (~context-rot onset); null disables
+  urgentCapTokens: 450000,    // absolute URGENT floor — binds on 1M windows (~clearly degrading); null disables
   contextLimitTokens: null,   // pin this machine's window size (e.g. 1000000); null = auto-detect
   contextLimits: { default: 200000, '1m': 1000000 }, // fallback window size by model id
   newSessionFlags: '--permission-mode auto', // flags for the launched session; '' for none, '--dangerously-skip-permissions' for fully hands-free (disables ALL gates)
@@ -124,12 +125,16 @@ function readLastUsage(transcriptPath, opts) {
   return null;
 }
 
+// Trigger model = min(percentage gate, absolute token floor). The % gate binds on small
+// (200k) windows; the absolute floors bind on large (1M) windows, where a % gate fires far
+// too late (quality/recall erodes by ~300-450k tokens regardless of how big the window is).
 function handoffTier(pct, tokens, cfg) {
   cfg = cfg || {};
-  const notifyPct = cfg.notifyPct != null ? cfg.notifyPct : 0.70;
-  const urgentPct = cfg.urgentPct != null ? cfg.urgentPct : 0.88;
-  const soft = cfg.softCapTokens || null;
-  if (pct >= urgentPct) return 'urgent';
+  const notifyPct = cfg.notifyPct != null ? cfg.notifyPct : 0.55;
+  const urgentPct = cfg.urgentPct != null ? cfg.urgentPct : 0.70;
+  const soft = cfg.softCapTokens || null;     // absolute notify floor (binds on large windows)
+  const hard = cfg.urgentCapTokens || null;   // absolute urgent floor (binds on large windows)
+  if (pct >= urgentPct || (hard && tokens >= hard)) return 'urgent';
   if (pct >= notifyPct || (soft && tokens >= soft)) return 'notify';
   return null;
 }

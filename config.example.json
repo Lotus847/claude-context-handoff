@@ -1,8 +1,9 @@
 {
   "enabled": true,
-  "notifyPct": 0.70,
-  "urgentPct": 0.88,
-  "softCapTokens": null,
+  "notifyPct": 0.55,
+  "urgentPct": 0.70,
+  "softCapTokens": 300000,
+  "urgentCapTokens": 450000,
   "contextLimitTokens": null,
   "contextLimits": { "default": 200000, "1m": 1000000 },
   "newSessionFlags": "--permission-mode auto",

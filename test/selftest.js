@@ -25,6 +25,13 @@ eq('tier notify pct', c.handoffTier(0.72, 10, cfg), 'notify');
 eq('tier notify softcap', c.handoffTier(0.1, 350000, cfg), 'notify');
 eq('tier urgent', c.handoffTier(0.9, 10, cfg), 'urgent');
 truthy('tierRank ordering', c.tierRank('urgent') > c.tierRank('notify') && c.tierRank('notify') > c.tierRank(null));
+// min(pct gate, absolute token floor): floors bind on big (1M) windows, pct binds on small (200k)
+const cfg2 = { notifyPct: 0.55, urgentPct: 0.70, softCapTokens: 300000, urgentCapTokens: 450000 };
+eq('tier null below both', c.handoffTier(0.20, 200000, cfg2), null);          // 1M @ 20%, 200k tok
+eq('tier notify by token floor', c.handoffTier(0.31, 310000, cfg2), 'notify'); // 1M @ 31% → notify floor
+eq('tier urgent by token floor', c.handoffTier(0.46, 460000, cfg2), 'urgent'); // 1M @ 46% → urgent floor
+eq('tier notify by pct (200k)', c.handoffTier(0.60, 120000, cfg2), 'notify');  // 200k @ 60% → notify pct
+eq('tier urgent by pct (200k)', c.handoffTier(0.72, 144000, cfg2), 'urgent');  // 200k @ 72% → urgent pct
 
 truthy('key home -> session-', /^session-/.test(c.projectKeyFrom({ cwd: os.homedir(), session_id: 'abcd1234-xx' })));
 eq('key project leaf', c.projectKeyFrom({ cwd: path.join('C:', 'dev', 'my-app'), session_id: 'x' }), 'my-app');

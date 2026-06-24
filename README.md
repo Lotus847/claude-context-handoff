@@ -7,7 +7,7 @@ Long Claude Code sessions degrade: the context window fills, early turns get com
 This fixes that with two sensors and one action:
 
 - **A gauge hook** (the model's eyes) reads the real per-turn token usage Claude Code records in the transcript, and when you cross a threshold it injects a `[context-handoff]` nudge the model reads.
-- **A statusline** (your eyes) shows live `🧠 ctx 63% (126k/200k)`, green → yellow → red.
+- **A statusline** (your eyes) shows a live *accumulating* bar `🧠 [████████░░░░░░] 64% (640k/1M)`, green → yellow → red.
 - **A `/handoff` skill** (the hands) that — on the nudge, or when you type `/handoff` — writes a full-fidelity `HANDOFF.md` (authored while the session still holds the full context), then **opens a new session — by default a background session in `claude agents` (Agent View), with no new terminal — named and seeded to continue**, and offers to close the old one.
 
 ## Install
@@ -42,9 +42,10 @@ Edit `~/.claude/context-handoff/config.json` (re-read live):
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `notifyPct` | `0.70` | First "drifting past optimal" nudge at this fraction of the window |
-| `urgentPct` | `0.88` | "Act now" nudge — auto-compaction is near |
-| `softCapTokens` | `null` | Optional absolute early-notify floor (e.g. `300000` on a 1M-context model) |
+| `notifyPct` | `0.55` | Notify % gate — binds on 200k windows (≈ the quality knee) |
+| `urgentPct` | `0.70` | Urgent % gate — binds on 200k; safely below the ~83.5% auto-compaction ceiling |
+| `softCapTokens` | `300000` | Absolute **notify** floor (tokens) — binds on large (1M) windows, where a % gate fires far too late |
+| `urgentCapTokens` | `450000` | Absolute **urgent** floor (tokens) — binds on large windows (~where context-rot clearly degrades) |
 | `contextLimitTokens` | `null` | Pin your window size (e.g. `1000000`); `null` = auto-detect |
 | `newSessionFlags` | `"--permission-mode auto"` | Flags for the launched session. `""` for none; `"--dangerously-skip-permissions"` for fully hands-free (disables **all** gates) |
 | `newSessionMode` | `"agent"` | `"agent"` = background session in `claude agents` (Agent View; no terminal, cross-platform); `"tab"` = new Windows Terminal tab; `"window"` = separate window |
@@ -69,7 +70,9 @@ The default `agent` mode (background session in Agent View) works everywhere. Th
 
 ## How it works
 
-Claude Code writes each assistant turn's token `usage` into the session transcript, and hands the statusline a `context_window` object — both give the true context size. The gauge reads it, compares against the resolved window limit, and nudges once per threshold crossing (re-arming after a compaction drops the window). The `/handoff` skill is the high-fidelity, *active* complement to passive auto-summaries: it's authored by the session that still holds the full context.
+Claude Code writes each assistant turn's token `usage` into the session transcript, and hands the statusline a `context_window` object — both give the true context size (`used% = (input + cache_creation + cache_read) / context_window_size`, matching `/context`). The gauge reads it, compares against the trigger thresholds, and nudges once per tier crossing (re-arming after a compaction drops the window). The statusline tracks a per-session **high-water mark** so the bar *accumulates* smoothly instead of bouncing when Claude Code momentarily reports a smaller sub-call context. The `/handoff` skill is the high-fidelity, *active* complement to passive auto-summaries: it's authored by the session that still holds the full context.
+
+**How the trigger point is computed.** Two forces set it: (1) Claude Code **auto-compacts at ~83.5%** of the window (scales: ~167k on 200k, ~835k on 1M), so the handoff must fire below that with ~15k headroom; (2) **quality degrades long before that** — for reasoning-heavy agent work, "context rot" onset is ~300-450k tokens *regardless of window size* (RULER, NoLiMa, Chroma context-rot research). So a pure percentage gate is right for 200k windows but far too late for 1M (70% = 700k, well past the rot onset). The trigger is therefore **`min(percentage gate, absolute token floor)`**: the `*Pct` gates bind on 200k windows; the `*CapTokens` floors bind on 1M windows, catching quality erosion at ~30-45% instead of waiting for 70%.
 
 ## License
 
