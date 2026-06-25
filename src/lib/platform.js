@@ -81,11 +81,16 @@ function closeSession() {
   const out = ((r.stdout || '') + (r.stderr || '')).replace(/\x1b\[[0-9;]*m/g, '').trim();
   // Remove the bg-agent job record so the stopped session doesn't linger as a "stopped" stub in
   // `claude agents --all`. NON-destructive: the conversation transcript on disk is kept.
+  // SECURITY: shortId is a session-UUID prefix, but validate it and confirm the resolved path
+  // stays inside jobs/ so a malformed CLAUDE_CODE_SESSION_ID can never let a recursive/force
+  // rmSync escape the jobs dir (path traversal).
   let removedFromList = 'skip';
-  if (r.status === 0) {
-    try { fs.rmSync(path.join(os.homedir(), '.claude', 'jobs', shortId), { recursive: true, force: true }); removedFromList = 'job-record-deleted'; }
-    catch (e) { removedFromList = 'error'; }
-  }
+  if (r.status === 0 && /^[A-Za-z0-9_-]{1,64}$/.test(shortId)) {
+    const jobsBase = path.resolve(os.homedir(), '.claude', 'jobs');
+    const target = path.resolve(jobsBase, shortId);
+    if (target === jobsBase || !target.startsWith(jobsBase + path.sep)) { removedFromList = 'skip:path-escape'; }
+    else { try { fs.rmSync(target, { recursive: true, force: true }); removedFromList = 'job-record-deleted'; } catch (e) { removedFromList = 'error'; } }
+  } else if (r.status === 0) { removedFromList = 'skip:invalid-id'; }
   return { closed: r.status === 0, removedFromList, sessionId: sid, id: shortId, via: 'claude stop', out: out.slice(0, 160) };
 }
 
