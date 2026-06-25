@@ -79,7 +79,14 @@ function closeSession() {
   const bin = c.detectClaudeBin();
   const r = spawnSync(bin, ['stop', shortId], { encoding: 'utf8', timeout: 15000, windowsHide: true });
   const out = ((r.stdout || '') + (r.stderr || '')).replace(/\x1b\[[0-9;]*m/g, '').trim();
-  return { closed: r.status === 0, sessionId: sid, id: shortId, via: 'claude stop', out: out.slice(0, 160) };
+  // Remove the bg-agent job record so the stopped session doesn't linger as a "stopped" stub in
+  // `claude agents --all`. NON-destructive: the conversation transcript on disk is kept.
+  let removedFromList = 'skip';
+  if (r.status === 0) {
+    try { fs.rmSync(path.join(os.homedir(), '.claude', 'jobs', shortId), { recursive: true, force: true }); removedFromList = 'job-record-deleted'; }
+    catch (e) { removedFromList = 'error'; }
+  }
+  return { closed: r.status === 0, removedFromList, sessionId: sid, id: shortId, via: 'claude stop', out: out.slice(0, 160) };
 }
 
 // Pre-accept a folder's workspace-trust dialog by editing ~/.claude.json (cross-platform).
