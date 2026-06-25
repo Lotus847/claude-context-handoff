@@ -44,12 +44,26 @@ function resolveCurrentName() {
 }
 
 // ---- Color inheritance: copy only an EXPLICIT /color -----------------------------------------
-// A chat's color is on disk ONLY if `/color` was run (event {"type":"agent-color",...} in its
-// transcript); auto/default colors aren't stored. Re-emit the old color into the NEW session's
-// transcript so it shows on attach. Best-effort (color lives only in the UI; not verifiable here).
+// LANDMINE: the color Agent View RENDERS is the "color" field in the bg-agent job state
+// `~/.claude/jobs/<short-id>/state.json` — NOT the transcript. (`/color` also logs a
+// {"type":"agent-color"} line to the transcript, but writing THAT renders nothing.) So read THIS
+// session's job color and write it into the NEW session's job state — the daemon merges + keeps it.
+// Auto/default colors aren't stored, so only an explicit /color can be copied.
 const COLORS = ['red', 'blue', 'green', 'yellow', 'purple', 'orange', 'pink', 'cyan'];
 function sleepMs(ms) { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch {} }
-function transcriptPath(sid) {
+function jobStatePath(shortId) {
+  if (!shortId || !/^[A-Za-z0-9_-]{1,64}$/.test(shortId)) return '';        // guard: no path traversal
+  const base = path.resolve(os.homedir(), '.claude', 'jobs');
+  const dir = path.resolve(base, shortId);
+  if (dir !== path.join(base, shortId)) return '';
+  return path.join(dir, 'state.json');
+}
+function jobColor(shortId) {                                                // rendered color = job state "color"
+  const f = jobStatePath(shortId);
+  if (!f || !fs.existsSync(f)) return '';
+  try { const j = JSON.parse(fs.readFileSync(f, 'utf8')); return (j && COLORS.indexOf(String(j.color)) >= 0) ? String(j.color) : ''; } catch { return ''; }
+}
+function transcriptPath(sid) {                                              // fallback color source
   if (!sid) return '';
   const root = path.join(os.homedir(), '.claude', 'projects');
   try { for (const d of fs.readdirSync(root)) { const f = path.join(root, d, sid + '.jsonl'); if (fs.existsSync(f)) return f; } } catch {}
@@ -67,26 +81,29 @@ function lastAgentColor(sid) {
   } catch {}
   return '';
 }
+// Write the inherited color into the NEW session's job state (waits for it; atomic write). This
+// is the field Agent View renders.
 function applyColorToNew(shortId, color) {
   if (!color) return 'no-explicit-color';
   if (!shortId) return 'skip:no-id';
-  let nsid = '';
+  if (COLORS.indexOf(color) < 0) return 'skip:invalid-color';
+  const f = jobStatePath(shortId);
+  if (!f) return 'skip:bad-id';
+  for (let i = 0; i < 25 && !fs.existsSync(f); i++) sleepMs(400);
+  if (!fs.existsSync(f)) return 'skip:no-state-json';
   try {
-    const r = spawnSync(c.detectClaudeBin(), ['agents', '--json', '--all'], { encoding: 'utf8', timeout: 15000, windowsHide: true });
-    const arr = JSON.parse(r.stdout || '[]');
-    const ent = Array.isArray(arr) ? arr.find(a => a && a.id === shortId) : null;
-    nsid = ent && ent.sessionId ? String(ent.sessionId) : '';
-  } catch {}
-  if (!nsid) return 'skip:no-session';
-  let tx = '';
-  for (let i = 0; i < 15 && !tx; i++) { tx = transcriptPath(nsid); if (!tx) sleepMs(400); }
-  if (!tx) return 'skip:no-transcript-yet';
-  try { fs.appendFileSync(tx, JSON.stringify({ type: 'agent-color', agentColor: color, sessionId: nsid }) + '\n'); return 'applied:' + color; }
-  catch (e) { return 'error:' + ((e && e.message) || e); }
+    const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    j.color = color;
+    const tmp = f + '.handoff.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(j, null, 2));
+    fs.renameSync(tmp, f);
+    return 'applied:' + color;
+  } catch (e) { return 'error:' + ((e && e.message) || e); }
 }
 
 const inheritColor = cfg.inheritColor !== false;
-const currentColor = inheritColor ? lastAgentColor(process.env.CLAUDE_CODE_SESSION_ID || '') : '';
+const mySid = process.env.CLAUDE_CODE_SESSION_ID || '';
+const currentColor = inheritColor ? (jobColor(mySid.slice(0, 8)) || lastAgentColor(mySid)) : '';
 
 // --print-name: resolve {currentName, newName, currentColor} for /handoff (handoff.json + display).
 if (process.argv.includes('--print-name')) {
