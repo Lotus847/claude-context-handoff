@@ -60,7 +60,7 @@ Edit `~/.claude/context-handoff/config.json` (re-read live):
 | Launch — `tab` / `window` mode | ✅ (Windows Terminal / `start`) | ⏳ prints the manual command |
 | Auto-**close** the old session | ✅ | ⏳ close manually |
 
-The default `agent` mode (background session in Agent View) works everywhere. The Windows-only `tab`/`window` modes and auto-close use `wt`/`cmd`/`taskkill`; the macOS/Linux seam is `src/lib/platform.js`. **PRs welcome.**
+The default `agent` mode (background session in Agent View) works everywhere. The cross-platform auto-close uses `claude stop` (daemon-clean — a *killed* session would just respawn) plus a job-record delete; the Windows-only `tab`/`window` modes use `wt`/`cmd`; the macOS/Linux seam is `src/lib/platform.js`. **PRs welcome.**
 
 ## Security notes
 
