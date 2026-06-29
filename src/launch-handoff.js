@@ -123,8 +123,8 @@ const flags = arg('--flags', cfg.newSessionFlags != null ? cfg.newSessionFlags :
 const doTrust = cfg.trustNewSessionFolder === true;
 
 const prompt = handoff
-  ? `Continue our work from a previous session that ran low on context. First read the handoff doc at ${handoff} (it has the full context and a cold-start), then carry out its NEXT ACTION.`
-  : `Continue our previous work. Read the latest HANDOFF.md, then carry out its NEXT ACTION.`;
+  ? `Continue from a previous session that ran low on context. FIRST read the handoff doc at ${handoff} IN FULL and internalize it — its Snapshot, What-just-happened, Decisions & constraints (including the why-NOT behind each), Gotchas/landmines, Tried-&-rejected, and Verified-vs-assumed — do NOT skim for just the next step. THEN open and read any files or notes it references before doing anything. ONLY THEN carry out its NEXT ACTION.`
+  : `Continue our previous work. FIRST read the latest HANDOFF.md IN FULL and internalize it — Snapshot, What-just-happened, Decisions (including the why-NOT), Gotchas, Tried-&-rejected, Verified-vs-assumed — do NOT skim for just the next step. THEN open and read any files it references. ONLY THEN carry out its NEXT ACTION.`;
 
 // Pre-accept folder trust before launching (important in agent mode — no terminal to accept it).
 const trust = dry ? (doTrust ? 'would-set' : 'disabled') : (doTrust ? plat.setFolderTrust(cwd) : 'disabled');

@@ -35,7 +35,7 @@ Prints `{ key, dir, handoffPath, sidecarPath }` for this session. Use those **ex
 node -e "console.log(new Date().toISOString())"
 ```
 
-**4 — Write the handoff doc** to `handoffPath` (`HANDOFF.md`). Author it yourself at full fidelity. Structure (omit a section only if truly empty):
+**4 — Write the handoff doc** to `handoffPath` (`HANDOFF.md`). Author it yourself at full fidelity — the next session inherits only what you write here, so capture the *epistemic* state (what you tried, what bit you, what's proven vs assumed), not just the operational one. Structure — **if a section is empty, write "None — <reason>" rather than omitting it** (the absence of a landmine is itself signal):
 
 ```markdown
 # HANDOFF — <short title>   ·  ctx <NN>% at <ISO time>
@@ -59,7 +59,17 @@ node -e "console.log(new Date().toISOString())"
 - <waiting-on items>
 
 ## Decisions & constraints (do not relitigate)
-- <choices already made and why>
+- <decision> — chose because <why> — rejected <alternative(s)> because <why-NOT> (always include the why-not; a verdict without its argument gets relitigated)
+
+## Tried & rejected (do not retry)
+- <approach you attempted> — abandoned because <what actually went wrong / why it can't work> (write "None — nothing was tried and dropped" if empty)
+
+## Gotchas / landmines
+- <non-obvious trap, ordering constraint, footgun, or env quirk the next session will hit> (write "None observed" if empty)
+
+## Verified vs assumed
+- **Verified:** <claim> — proven by <exact command → the observed output you actually saw>
+- **Assumed (unproven — re-check before relying on it):** <belief you're acting on but never confirmed> (write "None — everything below was observed" if empty)
 
 ## Cold-start prompt (paste this into a fresh session)
 <a complete, self-contained paragraph that re-bootstraps the work from zero: what we're building, where we are, the exact next action, and which files to read first>
