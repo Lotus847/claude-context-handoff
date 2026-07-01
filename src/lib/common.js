@@ -154,10 +154,93 @@ function detectClaudeBin() {
   return 'claude';
 }
 
+// ---- Subscription usage gauge (the account-wide rolling 5h + weekly rate limits Claude Code
+// pipes into the statusline as `rate_limits`; Pro/Max only, populated after the first API response).
+function usageTier(pctFrac, ucfg) {
+  ucfg = ucfg || {};
+  const notify = ucfg.notifyPct != null ? ucfg.notifyPct : 0.75;
+  const urgent = ucfg.urgentPct != null ? ucfg.urgentPct : 0.90;
+  if (pctFrac >= urgent) return 'urgent';
+  if (pctFrac >= notify) return 'notify';
+  return null;
+}
+// A window's `resets_at` → tiny local-time label ('3p' / '3:10p'; kind 'wk' → weekday). '' if bad.
+function formatReset(resetsAt, kind) {
+  try {
+    if (resetsAt == null) return '';
+    let d;
+    if (typeof resetsAt === 'number' || /^\d+$/.test(String(resetsAt))) { let n = Number(resetsAt); if (n < 1e12) n *= 1000; d = new Date(n); }
+    else { d = new Date(String(resetsAt)); }
+    if (isNaN(d.getTime())) return '';
+    if (kind === 'wk') return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+    let h = d.getHours(); const m = d.getMinutes(); const ap = h >= 12 ? 'p' : 'a';
+    h = h % 12; if (h === 0) h = 12;
+    return m === 0 ? `${h}${ap}` : `${h}:${String(m).padStart(2, '0')}${ap}`;
+  } catch { return ''; }
+}
+// Time REMAINING until a window resets, compact ('2h13m' / '47m' / '<1m'); '' if past/unparseable.
+function formatCountdown(resetsAt) {
+  try {
+    if (resetsAt == null) return '';
+    let n;
+    if (typeof resetsAt === 'number' || /^\d+$/.test(String(resetsAt))) { n = Number(resetsAt); if (n < 1e12) n *= 1000; }
+    else { const d = new Date(String(resetsAt)); if (isNaN(d.getTime())) return ''; n = d.getTime(); }
+    const ms = n - Date.now(); if (ms <= 0) return '';
+    const mins = Math.round(ms / 60000); if (mins < 1) return '<1m';
+    const h = Math.floor(mins / 60), m = mins % 60;
+    return h ? (m ? `${h}h${m}m` : `${h}h`) : `${m}m`;
+  } catch { return ''; }
+}
+// Live 5h burn rate (%/15min). Persists (t,p) samples in a GLOBAL tmp file (usage is account-wide);
+// recent rate needs a real ≥3-min span (no seconds-old base → no divide-by-tiny spike); falls back
+// to the whole-window average once ≥15 min into the window. Sane-capped ≤99. null if not computable.
+function fiveHourRate(curPct, resetsAt, filePath) {
+  try {
+    if (typeof curPct !== 'number') return null;
+    const f = filePath || path.join(os.tmpdir(), 'claude-usage-5h-samples.json');
+    const nowS = Math.floor(Date.now() / 1000);
+    const st = readJson(f, null) || {};
+    let s = Array.isArray(st.samples) ? st.samples.filter(x => x && typeof x.t === 'number' && typeof x.p === 'number') : [];
+    const last = s.length ? s[s.length - 1] : null;
+    if (last && curPct < last.p - 5) s = [];                          // reset → drop stale history
+    if (!last || nowS - last.t >= 30) s.push({ t: nowS, p: curPct });
+    s = s.filter(x => x.t >= nowS - 25 * 60);
+    try { fs.writeFileSync(f, JSON.stringify({ samples: s })); } catch {}
+    const base = s.find(x => nowS - x.t >= 180);
+    if (base && curPct >= base.p) {
+      const per15 = (curPct - base.p) / (nowS - base.t) * 900;
+      if (per15 >= 0.1) return Math.min(per15, 99);
+    }
+    let R = Number(resetsAt);
+    if (isFinite(R) && R > 0) {
+      if (R > 1e12) R = Math.floor(R / 1000);
+      const winStart = R - 5 * 3600, el = nowS - winStart;
+      if (el >= 900 && curPct > 0) return Math.min(curPct / el * 900, 99);
+    }
+    return null;
+  } catch { return null; }
+}
+// Pace verdict: project curPct forward at rate15 (%/15m) to the reset — 'out' (with etaMin to 100%),
+// 'track' (finishes ≥85% but under), or 'room'. null if not computable.
+function usagePace(curPct, rate15, resetsAt) {
+  try {
+    if (typeof curPct !== 'number' || typeof rate15 !== 'number') return null;
+    let R = Number(resetsAt); if (!isFinite(R) || R <= 0) return null;
+    if (R > 1e12) R = Math.floor(R / 1000);
+    const nowS = Math.floor(Date.now() / 1000);
+    const minsTillReset = (R - nowS) / 60; if (minsTillReset <= 0) return null;
+    const ratePerMin = rate15 / 15;
+    const projected = curPct + ratePerMin * minsTillReset;
+    if (ratePerMin > 0 && projected >= 100) return { state: 'out', etaMin: Math.max(0, Math.round((100 - curPct) / ratePerMin)), projected: Math.round(projected) };
+    return { state: projected >= 85 ? 'track' : 'room', projected: Math.round(projected) };
+  } catch { return null; }
+}
+
 module.exports = {
   RUNTIME_DIR, CONFIG_PATH, DATA_DIR, DEFAULT_CONFIG, loadConfig,
   readStdin, parseHookInput, sessionIdFrom, slugify, projectKeyFrom,
   ensureDir, readJson, safeRead, writeFileAtomic, writeJsonAtomic,
   contextTokensFromUsage, modelContextLimit, resolveContextLimit, readLastUsage,
-  handoffTier, tierRank, handoffPathsFor, gaugeMarkerPath, detectClaudeBin
+  handoffTier, tierRank, handoffPathsFor, gaugeMarkerPath, detectClaudeBin,
+  usageTier, formatReset, formatCountdown, fiveHourRate, usagePace
 };

@@ -55,7 +55,49 @@ if (cw && typeof cw.used_percentage === 'number') {
   ctxStr = `${A.dim}🧠 ctx —${A.reset}`;
 }
 
+// Subscription plan-quota gauge: the account-wide rolling 5h + weekly limits Claude Code pipes in
+// as `rate_limits` (Pro/Max only; populated after the first API response). Same across all sessions.
+// Renders compact, e.g.  📊 5h 44% (3.7%/15m) ↺ 2h13m room · wk 18%
+const ucfg = cfg.usage || {};
+let usageStr = '';
+if (ucfg.enabled !== false) {
+  const rl = input.rate_limits || input.rateLimits || null;
+  const showAt = ucfg.showResetPct != null ? ucfg.showResetPct : 0.80;
+  const seg = (w, kind) => {
+    if (!w || typeof w.used_percentage !== 'number') return null;
+    const pct = Math.round(w.used_percentage);
+    const frac = pct / 100;
+    const tier = c.usageTier(frac, ucfg);
+    const col = tier === 'urgent' ? A.red : tier === 'notify' ? A.yellow : A.green;
+    let s = `${col}${kind} ${pct}%${A.reset}`;
+    const rat = w.resets_at != null ? w.resets_at : w.resetsAt;
+    if (kind === '5h') {
+      // live burn rate (%/15m) + countdown + pace verdict — your pace, how long, and whether it fits
+      const rate = c.fiveHourRate(pct, rat);
+      if (rate != null) s += `${A.dim} (${Math.round(rate * 10) / 10}%/15m)${A.reset}`;
+      const cd = c.formatCountdown(rat);
+      if (cd) s += `${A.dim} ↺ ${cd}${A.reset}`;
+      const pace = rate != null ? c.usagePace(pct, rate, rat) : null;
+      if (pace) {
+        if (pace.state === 'out') s += ` ${A.red}⚠ out ~${pace.etaMin}m${A.reset}`;
+        else if (pace.state === 'track') s += ` ${A.yellow}on-track${A.reset}`;
+        else s += ` ${A.green}room${A.reset}`;
+      }
+    } else if (frac >= showAt) {
+      const r = c.formatReset(rat, kind);
+      if (r) s += `${A.dim} ↺ ${r}${A.reset}`;
+    }
+    return s;
+  };
+  const segs = [
+    seg(rl && (rl.five_hour || rl.fiveHour), '5h'),
+    seg(rl && (rl.seven_day || rl.sevenDay), 'wk')
+  ].filter(Boolean);
+  if (segs.length) usageStr = `${A.dim}📊${A.reset} ` + segs.join(`${A.dim} · ${A.reset}`);
+}
+
 const parts = [`${A.dim}${proj}${A.reset}`, ctxStr];
+if (usageStr) parts.push(usageStr);
 if (model) parts.push(`${A.dim}${model}${A.reset}`);
 process.stdout.write(parts.join(`${A.dim} │ ${A.reset}`));
 process.exit(0);
